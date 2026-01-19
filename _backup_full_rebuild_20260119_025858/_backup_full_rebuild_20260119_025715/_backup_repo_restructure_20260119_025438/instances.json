@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "instance_1",
+    "config_dir": "/home/syko/printer_data_instances/instance_1/config",
+    "klipper_dir": "/home/syko/klipper_1",
+    "service_name": "klipper1",
+    "klipper_port": 7125,
+    "moonraker_port": 7126,
+    "moonraker_service": "moonraker1",
+    "active": false,
+    "sandbox": true
+  }
+]

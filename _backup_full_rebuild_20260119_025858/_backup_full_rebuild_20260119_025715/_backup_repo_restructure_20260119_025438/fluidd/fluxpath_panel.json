@@ -1,0 +1,143 @@
+{
+\
+  "name": "FluxPath MMU",
+\
+  "icon": "mdi:source-branch",
+\
+  "sections": [
+\
+    {
+\
+      "name": "Lanes",
+\
+      "controls": [
+\
+        {
+\
+          "name": "Set Lane 1",
+\
+          "type": "command",
+\
+          "command": "MMU_UI_SET_LANE LANE=1"
+\
+        },
+\
+        {
+\
+          "name": "Set Lane 2",
+\
+          "type": "command",
+\
+          "command": "MMU_UI_SET_LANE LANE=2"
+\
+        },
+\
+        {
+\
+          "name": "Set Lane 3",
+\
+          "type": "command",
+\
+          "command": "MMU_UI_SET_LANE LANE=3"
+\
+        },
+\
+        {
+\
+          "name": "Set Lane 4",
+\
+          "type": "command",
+\
+          "command": "MMU_UI_SET_LANE LANE=4"
+\
+        }
+\
+      ]
+\
+    },
+\
+    {
+\
+      "name": "Core Actions",
+\
+      "controls": [
+\
+        {
+\
+          "name": "Preload",
+\
+          "type": "command",
+\
+          "command": "MMU_UI_PRELOAD"
+\
+        },
+\
+        {
+\
+          "name": "Load",
+\
+          "type": "command",
+\
+          "command": "MMU_UI_LOAD"
+\
+        },
+\
+        {
+\
+          "name": "Unload",
+\
+          "type": "command",
+\
+          "command": "MMU_UI_UNLOAD"
+\
+        },
+\
+        {
+\
+          "name": "Park",
+\
+          "type": "command",
+\
+          "command": "MMU_UI_PARK"
+\
+        }
+\
+      ]
+\
+    },
+\
+    {
+\
+      "name": "Diagnostics",
+\
+      "controls": [
+\
+        {
+\
+          "name": "Print Vars",
+\
+          "type": "command",
+\
+          "command": "MMU_UI_PRINT_VARS"
+\
+        },
+\
+        {
+\
+          "name": "Sensor Test",
+\
+          "type": "command",
+\
+          "command": "MMU_DIAG_SENSOR_TEST"
+\
+        }
+\
+      ]
+\
+    }
+\
+  ]
+\
+}
+\
+

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fluxpath"
+version = "0.1.0"
+description = "FluxPath MMU intelligence backend"
+authors = [{ name = "Sy" }]
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "requests",
+    "websockets",
+]

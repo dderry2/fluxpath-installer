@@ -1,0 +1,120 @@
+--- Searching for MMU modules ---
+/home/syko/FluxPath/fluxpath/core/mmu.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/pip/_internal/commands/download.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/pip/_internal/network/download.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/uvicorn/supervisors/watchfilesreload.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/uvicorn/supervisors/statreload.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/uvicorn/supervisors/basereload.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/setuptools/_distutils/command/upload.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/setuptools/command/upload.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/setuptools/command/upload_docs.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/pydantic/plugin/_loader.py
+/home/syko/FluxPath/venv/lib/python3.11/site-packages/yaml/loader.py
+
+--- Searching for MMU classes/functions ---
+
+File: /home/syko/FluxPath/fluxpath/core/mmu.py
+class Filament:
+class MMUCapabilities:
+class ToolchangePlan:
+class MMUManager:
+    def __init__(self) -> None:
+    def get_capabilities(self) -> Dict:
+    def set_filaments(self, filaments: List[Dict]) -> List[Dict]:
+    def get_filaments(self) -> List[Dict]:
+    def plan_toolchanges(self, sequence: List[ToolID]) -> Dict:
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/pip/_internal/commands/download.py
+class DownloadCommand(RequirementCommand):
+    def add_options(self) -> None:
+    def run(self, options: Values, args: list[str]) -> int:
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/pip/_internal/network/download.py
+def _get_http_response_size(resp: Response) -> int | None:
+def _get_http_response_etag_or_last_modified(resp: Response) -> str | None:
+def _log_download(
+def sanitize_content_filename(filename: str) -> str:
+def parse_content_disposition(content_disposition: str, default_filename: str) -> str:
+def _get_http_response_filename(resp: Response, link: Link) -> str:
+class _FileDownload:
+    def is_incomplete(self) -> bool:
+    def write_chunk(self, data: bytes) -> None:
+    def reset_file(self) -> None:
+class Downloader:
+    def __init__(
+    def batch(
+    def __call__(self, link: Link, location: str) -> tuple[str, str]:
+    def _process_response(self, download: _FileDownload, resp: Response) -> None:
+    def _attempt_resumes_or_redownloads(
+    def _cache_resumed_download(
+    def _http_get_resume(
+    def _http_get(self, link: Link, headers: Mapping[str, str] = HEADERS) -> Response:
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/uvicorn/supervisors/watchfilesreload.py
+class FileFilter:
+    def __init__(self, config: Config):
+    def __call__(self, path: Path) -> bool:
+class WatchFilesReload(BaseReload):
+    def __init__(
+    def should_restart(self) -> list[Path] | None:
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/uvicorn/supervisors/statreload.py
+class StatReload(BaseReload):
+    def __init__(
+    def should_restart(self) -> list[Path] | None:
+    def restart(self) -> None:
+    def iter_py_files(self) -> Iterator[Path]:
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/uvicorn/supervisors/basereload.py
+class BaseReload:
+    def __init__(
+    def signal_handler(self, sig: int, frame: FrameType | None) -> None:  # pragma: full coverage
+    def run(self) -> None:
+    def pause(self) -> None:
+    def __iter__(self) -> Iterator[list[Path] | None]:
+    def __next__(self) -> list[Path] | None:
+    def startup(self) -> None:
+    def restart(self) -> None:
+    def shutdown(self) -> None:
+    def should_restart(self) -> list[Path] | None:
+def _display_path(path: Path) -> str:
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/setuptools/_distutils/command/upload.py
+class upload(PyPIRCCommand):
+    def initialize_options(self):
+    def finalize_options(self):
+    def run(self):
+    def upload_file(self, command, pyversion, filename):  # noqa: C901
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/setuptools/command/upload.py
+class upload(orig.upload):
+    def run(self):
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/setuptools/command/upload_docs.py
+def _encode(s):
+class upload_docs(upload):
+    def has_sphinx(self):
+    def initialize_options(self):
+    def finalize_options(self):
+    def create_zipfile(self, filename):
+    def run(self):
+    def _build_part(item, sep_boundary):
+    def _build_multipart(cls, data):
+    def upload_file(self, filename):
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/pydantic/plugin/_loader.py
+def get_plugins() -> Iterable[PydanticPluginProtocol]:
+
+File: /home/syko/FluxPath/venv/lib/python3.11/site-packages/yaml/loader.py
+class BaseLoader(Reader, Scanner, Parser, Composer, BaseConstructor, BaseResolver):
+    def __init__(self, stream):
+class FullLoader(Reader, Scanner, Parser, Composer, FullConstructor, Resolver):
+    def __init__(self, stream):
+class SafeLoader(Reader, Scanner, Parser, Composer, SafeConstructor, Resolver):
+    def __init__(self, stream):
+class Loader(Reader, Scanner, Parser, Composer, Constructor, Resolver):
+    def __init__(self, stream):
+class UnsafeLoader(Reader, Scanner, Parser, Composer, Constructor, Resolver):
+    def __init__(self, stream):
+
+=== MMU Auto‑Discovery Complete ===

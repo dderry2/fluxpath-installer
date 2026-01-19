@@ -1,0 +1,16 @@
+import asyncio
+import threading
+
+from fluxpath.device.discovery import start_broadcast
+from fluxpath.device.websocket_server import start_ws
+
+def main():
+    # Run broadcaster in a background thread
+    t = threading.Thread(target=start_broadcast, daemon=True)
+    t.start()
+
+    # Run WebSocket server in the main thread
+    asyncio.run(start_ws())
+
+if __name__ == "__main__":
+    main()
