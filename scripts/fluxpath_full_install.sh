@@ -55,6 +55,42 @@ if [ -d "$BASE_DIR/.git" ]; then
     esac
   fi
 
+  # === Upstream auto-fix ===
+  echo "→ Checking Git upstream tracking..."
+
+  CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+  UPSTREAM=$(git rev-parse --abbrev-ref "$CURRENT_BRANCH"@{upstream} 2>/dev/null || true)
+
+  if [ -z "$UPSTREAM" ]; then
+    echo "⚠ No upstream branch is set for '$CURRENT_BRANCH'."
+    echo "Choose how to fix it:"
+    echo "  1) Set upstream to origin/main"
+    echo "  2) Set upstream to origin/master"
+    echo "  3) Enter a custom remote/branch"
+    echo ""
+
+    read -p "Enter choice [1/2/3]: " upstream_choice
+
+    case "$upstream_choice" in
+      1)
+        git branch --set-upstream-to=origin/main "$CURRENT_BRANCH"
+        ;;
+      2)
+        git branch --set-upstream-to=origin/master "$CURRENT_BRANCH"
+        ;;
+      3)
+        read -p "Enter remote name (default: origin): " REMOTE
+        read -p "Enter branch name: " BRANCH
+        REMOTE=${REMOTE:-origin}
+        git branch --set-upstream-to="$REMOTE/$BRANCH" "$CURRENT_BRANCH"
+        ;;
+      *)
+        echo "Invalid choice. Aborting."
+        exit 1
+        ;;
+    esac
+  fi
+
   echo "→ Pulling latest changes..."
   git pull --rebase
 else
