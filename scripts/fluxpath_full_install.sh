@@ -1,278 +1,181 @@
 #!/bin/bash
 set -e
 
-echo "=== FluxPath Full Platform Installer ==="
+echo "=== FluxPath Full Installer ==="
 
-REPO_URL="https://github.com/dderry2/fluxpath-installer"
-BASE_DIR="/home/$USER/FluxPath"
-SERVICE_NAME="fluxpath.service"
-VENV_DIR="$BASE_DIR/venv"
-SERVER_FILE="$BASE_DIR/server.py"
+BASE_DIR="$HOME/FluxPath"
+CONFIG_DIR="$BASE_DIR/config"
+CONFIG_FILE="$CONFIG_DIR/fluxpath_config.json"
 
-echo "→ Ensuring system dependencies..."
-sudo apt update
-sudo apt install -y python3 python3-venv python3-pip git curl
+mkdir -p "$CONFIG_DIR"
+
+# Load defaults if config exists
+if [ -f "$CONFIG_FILE" ]; then
+  echo "→ Loading existing config defaults..."
+  DEFAULTS=$(cat "$CONFIG_FILE")
+else
+  DEFAULTS="{}"
+fi
+
+# Helper to extract default values
+get_default() {
+  echo "$DEFAULTS" | jq -r "$1" 2>/dev/null || echo ""
+}
+
+# === Git conflict handling ===
+cd "$BASE_DIR" 2>/dev/null || true
 
 if [ -d "$BASE_DIR/.git" ]; then
-  echo "→ Existing FluxPath installation detected. Updating..."
-  cd "$BASE_DIR"
+  echo "→ Checking for local Git changes..."
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo ""
+    echo "⚠ You have uncommitted changes."
+    echo "Choose how to proceed:"
+    echo "  1) Commit changes"
+    echo "  2) Stash changes"
+    echo "  3) Discard changes"
+    echo ""
+    read -p "Enter choice [1/2/3]: " choice
+
+    case "$choice" in
+      1)
+        git add -A
+        git commit -m "Auto-commit before installer update"
+        ;;
+      2)
+        git stash push -m "FluxPath installer auto-stash"
+        ;;
+      3)
+        git reset --hard HEAD
+        ;;
+      *)
+        echo "Invalid choice."
+        exit 1
+        ;;
+    esac
+  fi
+
+  echo "→ Pulling latest changes..."
   git pull --rebase
 else
-  echo "→ No installation found. Installing fresh copy..."
+  echo "→ No Git repo found. Initializing..."
   mkdir -p "$BASE_DIR"
   cp -r . "$BASE_DIR"
   cd "$BASE_DIR"
   git init
-  git remote add origin "$REPO_URL"
+  git remote add origin https://github.com/dderry2/fluxpath-installer
   git branch -M main
 fi
 
-echo "→ Creating virtual environment (if missing)..."
-if [ ! -d "$VENV_DIR" ]; then
-  python3 -m venv "$VENV_DIR"
+# === Prompt for MCU settings ===
+echo ""
+echo "=== MCU Configuration ==="
+
+read -p "MCU type [$(get_default '.mcu.type')]: " MCU_TYPE
+read -p "MCU serial port [$(get_default '.mcu.serial_port')]: " MCU_PORT
+read -p "MCU baud rate [$(get_default '.mcu.baud_rate')]: " MCU_BAUD
+read -p "MCU pin scheme [$(get_default '.mcu.pin_scheme')]: " MCU_PINS
+read -p "MCU frequency MHz [$(get_default '.mcu.frequency_mhz')]: " MCU_FREQ
+read -p "Stepper driver type [$(get_default '.mcu.driver.type')]: " DRIVER_TYPE
+read -p "Driver UART pin [$(get_default '.mcu.driver.uart_pin')]: " DRIVER_UART
+read -p "Reset on connect (yes/no) [$(get_default '.mcu.reset_on_connect')]: " MCU_RESET
+read -p "Firmware version [$(get_default '.mcu.firmware_version')]: " MCU_FW
+
+# === Prompt for MMU settings ===
+echo ""
+echo "=== MMU Configuration ==="
+
+read -p "Number of slots [$(get_default '.mmu.slots')]: " MMU_SLOTS
+read -p "Stepper STEP pin [$(get_default '.mmu.pins.stepper.step')]: " STEP_PIN
+read -p "Stepper DIR pin [$(get_default '.mmu.pins.stepper.dir')]: " DIR_PIN
+read -p "Stepper ENABLE pin [$(get_default '.mmu.pins.stepper.enable')]: " ENABLE_PIN
+
+read -p "Filament sensor pin [$(get_default '.mmu.pins.sensors.filament')]: " SENSOR_PIN
+read -p "Selector home pin [$(get_default '.mmu.pins.sensors.selector_home')]: " HOME_PIN
+
+read -p "Enable cutter (yes/no) [$(get_default '.mmu.pins.cutter.enabled')]: " CUTTER_ENABLED
+if [ "$CUTTER_ENABLED" == "yes" ]; then
+  read -p "Cutter pin [$(get_default '.mmu.pins.cutter.pin')]: " CUTTER_PIN
 fi
 
-echo "→ Activating venv and installing dependencies..."
-source "$VENV_DIR/bin/activate"
-pip install --upgrade pip
-# Prefer pyproject‑based install if configured, otherwise fallback
-if [ -f "pyproject.toml" ]; then
-  pip install .
-elif [ -f "requirements.txt" ]; then
-  pip install -r requirements.txt
+read -p "Selector type (servo/stepper) [$(get_default '.mmu.pins.selector.type')]: " SELECTOR_TYPE
+
+if [ "$SELECTOR_TYPE" == "servo" ]; then
+  read -p "Servo pin [$(get_default '.mmu.pins.selector.pin')]: " SERVO_PIN
+  read -p "Servo min pulse [$(get_default '.mmu.pins.selector.min_pulse')]: " SERVO_MIN
+  read -p "Servo max pulse [$(get_default '.mmu.pins.selector.max_pulse')]: " SERVO_MAX
+else
+  read -p "Selector STEP pin [$(get_default '.mmu.pins.selector.step')]: " SEL_STEP
+  read -p "Selector DIR pin [$(get_default '.mmu.pins.selector.dir')]: " SEL_DIR
+  read -p "Selector ENABLE pin [$(get_default '.mmu.pins.selector.enable')]: " SEL_ENABLE
 fi
 
-if [ ! -f "$SERVER_FILE" ]; then
-  echo "✖ server.py not found in $BASE_DIR. Aborting."
-  exit 1
-fi
+read -p "Motor current (mA) [$(get_default '.mmu.motor_current')]: " MOTOR_CURRENT
+read -p "Load speed (mm/s) [$(get_default '.mmu.load_speed')]: " LOAD_SPEED
+read -p "Unload speed (mm/s) [$(get_default '.mmu.unload_speed')]: " UNLOAD_SPEED
+read -p "Retract length (mm) [$(get_default '.mmu.retract_length')]: " RETRACT_LEN
 
-echo "→ Ensuring MMU engine + state machine scaffolding..."
+# === Write config ===
+echo "→ Writing config to $CONFIG_FILE..."
 
-MMU_DIR="$BASE_DIR/mmu"
-mkdir -p "$MMU_DIR"
-
-MMU_ENGINE_FILE="$MMU_DIR/mmu_engine.py"
-if [ ! -f "$MMU_ENGINE_FILE" ]; then
-  cat > "$MMU_ENGINE_FILE" << 'EOF'
-from enum import Enum
-
-class MMUState(str, Enum):
-    IDLE = "idle"
-    SWITCHING = "switching"
-    LOADING = "loading"
-    UNLOADING = "unloading"
-    ERROR = "error"
-
-class MMUEngine:
-    def __init__(self):
-        self.state = MMUState.IDLE
-        self.active_slot = 0
-        self.filament_map = {}  # slot -> metadata
-
-    def get_status(self):
-        return {
-            "state": self.state,
-            "active_slot": self.active_slot,
-            "filament_map": self.filament_map,
-        }
-
-    def switch_slot(self, slot: int):
-        self.state = MMUState.SWITCHING
-        # TODO: hardware call
-        self.active_slot = slot
-        self.state = MMUState.IDLE
-        return self.get_status()
-
-    def load_filament(self):
-        self.state = MMUState.LOADING
-        # TODO: hardware call
-        self.state = MMUState.IDLE
-        return self.get_status()
-
-    def unload_filament(self):
-        self.state = MMUState.UNLOADING
-        # TODO: hardware call
-        self.state = MMUState.IDLE
-        return self.get_status()
-
-    def reset(self):
-        self.state = MMUState.IDLE
-        return self.get_status()
-EOF
-fi
-
-echo "→ Injecting MMU API, slicer integration, LAN discovery, and multicolor pipeline into server.py (idempotent-ish)..."
-
-# Only append once: simple guard
-if ! grep -q "MMU API Integration" "$SERVER_FILE"; then
-  cat >> "$SERVER_FILE" << 'EOF'
-
-# ============================
-# MMU API Integration
-# ============================
-
-from fastapi import HTTPException, UploadFile, File
-from typing import Optional
-from mmu.mmu_engine import MMUEngine
-
-mmu = MMUEngine()
-
-@app.get("/mmu/status")
-def mmu_status():
-    return mmu.get_status()
-
-@app.post("/mmu/switch/{slot}")
-def mmu_switch(slot: int):
-    try:
-        return mmu.switch_slot(slot)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/mmu/load")
-def mmu_load():
-    try:
-        return mmu.load_filament()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/mmu/unload")
-def mmu_unload():
-    try:
-        return mmu.unload_filament()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/mmu/reset")
-def mmu_reset():
-    try:
-        return mmu.reset()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ============================
-# Slicer Integration + LAN Capabilities
-# ============================
-
-@app.get("/fluxpath/capabilities")
-def capabilities():
-    return {
-        "device": "FluxPath",
-        "version": "1.0.0",
-        "supports_upload": True,
-        "supports_mmu": True,
-        "supports_job_control": True,
-        "lan_discovery": True,
-        "ui": "mainsail/fluidd-compatible",
+cat > "$CONFIG_FILE" <<EOF
+{
+  "mcu": {
+    "type": "$MCU_TYPE",
+    "serial_port": "$MCU_PORT",
+    "baud_rate": $MCU_BAUD,
+    "pin_scheme": "$MCU_PINS",
+    "frequency_mhz": $MCU_FREQ,
+    "driver": {
+      "type": "$DRIVER_TYPE",
+      "uart_pin": "$DRIVER_UART"
+    },
+    "reset_on_connect": $( [ "$MCU_RESET" == "yes" ] && echo true || echo false ),
+    "firmware_version": "$MCU_FW"
+  },
+  "mmu": {
+    "slots": $MMU_SLOTS,
+    "motor_current": $MOTOR_CURRENT,
+    "load_speed": $LOAD_SPEED,
+    "unload_speed": $UNLOAD_SPEED,
+    "retract_length": $RETRACT_LEN,
+    "pins": {
+      "stepper": {
+        "step": "$STEP_PIN",
+        "dir": "$DIR_PIN",
+        "enable": "$ENABLE_PIN"
+      },
+      "sensors": {
+        "filament": "$SENSOR_PIN",
+        "selector_home": "$HOME_PIN"
+      },
+      "cutter": {
+        "enabled": $( [ "$CUTTER_ENABLED" == "yes" ] && echo true || echo false ),
+        "pin": "$CUTTER_PIN"
+      },
+      "selector": {
+        "type": "$SELECTOR_TYPE",
+        "pin": "$SERVO_PIN",
+        "min_pulse": $SERVO_MIN,
+        "max_pulse": $SERVO_MAX,
+        "step": "$SEL_STEP",
+        "dir": "$SEL_DIR",
+        "enable": "$SEL_ENABLE"
+      }
     }
-
-UPLOAD_DIR = "jobs"
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-@app.post("/print/upload")
-async def upload_print_job(file: UploadFile = File(...)):
-    path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(path, "wb") as f:
-        f.write(await file.read())
-    # TODO: queue job, parse for color changes
-    return {"status": "ok", "filename": file.filename}
-
-current_job: Optional[str] = None
-job_state: str = "idle"
-
-@app.post("/print/start")
-def start_print():
-    global current_job, job_state
-    # TODO: integrate with printer + MMU pipeline
-    job_state = "printing"
-    return {"status": "ok", "state": job_state}
-
-@app.post("/print/pause")
-def pause_print():
-    global job_state
-    job_state = "paused"
-    return {"status": "ok", "state": job_state}
-
-@app.post("/print/cancel")
-def cancel_print():
-    global job_state, current_job
-    job_state = "cancelled"
-    current_job = None
-    return {"status": "ok", "state": job_state}
-
-# ============================
-# Multicolor G-code Pipeline (Stub)
-# ============================
-
-COLOR_CHANGE_MARKERS = [";COLOR_CHANGE", ";LAYER_COLOR", ";FLUXPATH_COLOR"]
-
-def process_gcode_for_multicolor(gcode_path: str):
-    """
-    Stub: scan G-code for color change markers and
-    schedule MMU slot switches.
-    """
-    if not os.path.exists(gcode_path):
-        return {"error": "file not found"}
-
-    color_events = []
-    with open(gcode_path, "r") as f:
-        for line_no, line in enumerate(f, start=1):
-            for marker in COLOR_CHANGE_MARKERS:
-                if marker in line:
-                    # TODO: parse slot from comment, e.g. ;COLOR_CHANGE SLOT=2
-                    color_events.append({"line": line_no, "marker": marker})
-    return {"color_events": color_events}
-
-@app.get("/print/analyze/{filename}")
-def analyze_print_job(filename: str):
-    path = os.path.join(UPLOAD_DIR, filename)
-    return process_gcode_for_multicolor(path)
-
-# ============================
-# Web UI MMU Hooks (for Mainsail/Fluidd)
-# ============================
-
-@app.get("/ui/mmu/summary")
-def ui_mmu_summary():
-    """
-    Endpoint for UI to poll MMU state.
-    """
-    return mmu.get_status()
+  }
+}
 EOF
-fi
 
-echo "→ Installing systemd service..."
-sudo cp "$BASE_DIR/systemd/$SERVICE_NAME" /etc/systemd/system/$SERVICE_NAME
+# === Restart backend ===
+echo "→ Restarting backend..."
 sudo systemctl daemon-reload
-sudo systemctl enable $SERVICE_NAME
-sudo systemctl restart $SERVICE_NAME
+sudo systemctl enable fluxpath.service
+sudo systemctl restart fluxpath.service
 
-echo "→ Waiting for backend to start..."
 sleep 3
 
-echo "→ Checking /health..."
-if curl -s http://localhost:9876/health > /dev/null; then
-  echo "✔ Backend /health OK"
-else
-  echo "✖ Backend /health failed. Check: sudo journalctl -u $SERVICE_NAME -f"
-fi
+echo "→ Checking backend health..."
+curl -s http://localhost:9876/health && echo "✔ Backend OK" || echo "✖ Backend failed"
 
-echo "→ Checking MMU status endpoint..."
-curl -s http://localhost:9876/mmu/status || echo "⚠ /mmu/status not responding"
-
-echo "→ Checking slicer capabilities..."
-curl -s http://localhost:9876/fluxpath/capabilities || echo "⚠ /fluxpath/capabilities not responding"
-
-echo "→ Checking MMU hardware..."
-if lsusb | grep -i "serial" > /dev/null || dmesg | grep -i ttyUSB > /dev/null; then
-  echo "✔ MMU hardware detected."
-else
-  echo "⚠ No MMU hardware detected."
-fi
-
-echo "=== FluxPath full platform install complete ==="
-echo "Backend:   http://<host>:9876"
-echo "MMU API:   /mmu/status, /mmu/switch/{slot}, /mmu/load, /mmu/unload, /mmu/reset"
-echo "Slicer:    /fluxpath/capabilities, /print/upload, /print/start, /print/pause, /print/cancel"
-echo "Multicolor: /print/analyze/{filename} (stubbed color event detection)"
-echo "UI MMU:    /ui/mmu/summary"
+echo "=== FluxPath installation complete ==="
