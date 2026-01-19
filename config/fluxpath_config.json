@@ -1,0 +1,33 @@
+{
+  "mmu": {
+    "motors": [
+      {
+        "step": "PB13",
+        "dir": "PB12",
+        "enable": "mmu:PB14",
+        "microsteps": 16,
+        "rotation_distance": 22.67895,
+        "gear_ratio": "3:1"
+      },
+      {
+        "step": "PB10",
+        "dir": "PB2",
+        "enable": "mmu:PB11",
+        "microsteps": 16,
+        "rotation_distance": 22.67895,
+        "gear_ratio": "3:1"
+      }
+    ],
+    "sensors": {
+      "pre_gate_0": "mmu:PB7",
+      "pre_gate_1": "mmu:PB8",
+      "main": "mmu:PB9"
+    },
+    "cutter": {
+      "pin": "PA1",
+      "min_pulse": 0.0005,
+      "max_pulse": 0.0025,
+      "max_angle": 180
+    }
+  }
+}
