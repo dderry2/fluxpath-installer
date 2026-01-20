@@ -1,7 +1,6 @@
 #!/bin/bash
 set -e
 
-# ------------------------ FluxPath Banner ------------------------
 LOGO=$(cat << 'BEOF'
   __ _  _  ___   _____  __ _____ _  _  
 | __| || || \ \_/ / _,\/  \_   _| || | 
@@ -10,7 +9,6 @@ LOGO=$(cat << 'BEOF'
 BEOF
 )
 
-# ------------------------ Paths ------------------------
 BASE_DIR="$HOME/FluxPath"
 CONFIG_DIR="$BASE_DIR/config"
 UI_DIR="$BASE_DIR/ui"
@@ -18,9 +16,12 @@ MAINSAIL_PANELS="$HOME/.local/share/mainsail/panels"
 FLUIDD_PANELS="$HOME/.local/share/fluidd/panels"
 CONFIG_FILE="$CONFIG_DIR/fluxpath_config.json"
 
+MMU_CFG_DIR="/fluxpath_mmu"
+MMU_PINS_CFG="$MMU_CFG_DIR/mmu_pins.cfg"
+
 mkdir -p "$CONFIG_DIR" "$UI_DIR" "$MAINSAIL_PANELS" "$FLUIDD_PANELS"
 
-# ------------------------ Defaults ------------------------
+# ---------- Defaults (fallbacks if mmu_pins.cfg missing) ----------
 DEFAULT_MOTORS=4
 DEFAULT_COLORS="Red,Green,Blue,Yellow"
 DEFAULT_FEED_DISTANCE="120.0"
@@ -28,7 +29,9 @@ DEFAULT_RETRACT_DISTANCE="80.0"
 DEFAULT_CUTTER_PRESENT="true"
 DEFAULT_CUTTER_PIN="PA0"
 
-# These variables will be filled by the wizard
+DEFAULT_MOTOR_PINS=()
+DEFAULT_SENSOR_PINS=()
+
 W_MOTOR_COUNT="$DEFAULT_MOTORS"
 W_MOTOR_PINS=()
 W_SENSOR_PINS=()
@@ -38,7 +41,40 @@ W_CUTTER_PIN="$DEFAULT_CUTTER_PIN"
 W_FEED_DISTANCE="$DEFAULT_FEED_DISTANCE"
 W_RETRACT_DISTANCE="$DEFAULT_RETRACT_DISTANCE"
 
-# ------------------------ Dependency checks ------------------------
+# ---------- Load defaults from existing Klipper MMU config ----------
+load_defaults_from_klipper() {
+  if [ ! -f "$MMU_PINS_CFG" ]; then
+    return
+  fi
+
+  # Try to infer motor pins: lines like "mmu_motor_1_pin: PA0"
+  mapfile -t DEFAULT_MOTOR_PINS < <(grep -Ei 'mmu_motor_[0-9]+_pin' "$MMU_PINS_CFG" | awk -F'[: ]+' '{print $NF}' | sed 's/#.*//g' | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+  # Try to infer sensor pins: lines like "mmu_sensor_1_pin: PB0"
+  mapfile -t DEFAULT_SENSOR_PINS < <(grep -Ei 'mmu_sensor_[0-9]+_pin' "$MMU_PINS_CFG" | awk -F'[: ]+' '{print $NF}' | sed 's/#.*//g' | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+  # Try to infer cutter pin: line like "mmu_cutter_pin: PC0"
+  local cutter_line
+  cutter_line=$(grep -Ei 'mmu_cutter_pin' "$MMU_PINS_CFG" | head -n1 || true)
+  if [ -n "$cutter_line" ]; then
+    local cp
+    cp=$(echo "$cutter_line" | awk -F'[: ]+' '{print $NF}' | sed 's/#.*//g' | sed 's/^[ \t]*//;s/[ \t]*$//')
+    [ -n "$cp" ] && DEFAULT_CUTTER_PIN="$cp"
+  fi
+
+  # Motor count from number of motor pins found
+  if [ "${#DEFAULT_MOTOR_PINS[@]}" -gt 0 ]; then
+    DEFAULT_MOTORS="${#DEFAULT_MOTOR_PINS[@]}"
+  fi
+
+  # Initialize working values from defaults
+  W_MOTOR_COUNT="$DEFAULT_MOTORS"
+  W_MOTOR_PINS=("${DEFAULT_MOTOR_PINS[@]}")
+  W_SENSOR_PINS=("${DEFAULT_SENSOR_PINS[@]}")
+  W_CUTTER_PIN="$DEFAULT_CUTTER_PIN"
+}
+
+# ---------- Dependency checks ----------
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing"
@@ -59,11 +95,14 @@ Config:    $CONFIG_DIR
 UI dir:    $UI_DIR
 Mainsail:  $MAINSAIL_PANELS
 Fluidd:    $FLUIDD_PANELS
+
+MMU cfg dir: $MMU_CFG_DIR
+mmu_pins:    $MMU_PINS_CFG
 "
   whiptail --title "FluxPath – Environment Check" --msgbox "$msg" 20 80
 }
 
-# ------------------------ Backend / API helpers ------------------------
+# ---------- Backend / API helpers ----------
 get_backend_health_raw() { curl -s http://localhost:9876/health 2>/dev/null || echo "unreachable"; }
 get_printer_info_raw()  { curl -s http://localhost:7125/printer/info 2>/dev/null || echo "unreachable"; }
 get_mmu_status_raw()    { curl -s http://localhost:9876/mmu/status 2>/dev/null || echo "unreachable"; }
@@ -79,7 +118,6 @@ backend_service_state() {
   fi
 }
 
-# ------------------------ Friendly wrappers ------------------------
 fmt_status() {
   local label="$1"
   local raw="$2"
@@ -103,9 +141,9 @@ fmt_webcam() {
   fi
 }
 
-# ------------------------ UI panels ------------------------
+# ---------- UI panels ----------
 ensure_ui_panels() {
-  cat <<PEOF > "$UI_DIR/mainsail_mmu_panel.json"
+  cat << 'PEOF' > "$UI_DIR/mainsail_mmu_panel.json"
 {
   "name": "FluxPath MMU",
   "type": "custom",
@@ -132,7 +170,7 @@ ui_panels_status() {
 $f"
 }
 
-# ------------------------ Banner & About ------------------------
+# ---------- Banner & About ----------
 show_banner() {
   whiptail --title "FluxPath Installer" --msgbox "$LOGO" 15 70
 }
@@ -157,12 +195,13 @@ Backend:
   Service: $(backend_service_state)
   Health:  $(get_backend_health_raw)
 
-(Printer tools will be added later.)
+MMU config source:
+  $MMU_PINS_CFG
 "
   whiptail --title "About FluxPath" --msgbox "$msg" 25 90
 }
 
-# ------------------------ Status Screens ------------------------
+# ---------- Status screens ----------
 show_system_status_once() {
   local backend_state backend_health printer mmu_status mmu_sensors mmu_motors webcam panels
 
@@ -242,171 +281,9 @@ $CONFIG_FILE"
 }
 
 # ============================================================
-# Advanced MMU Configuration Wizard (modular steps)
+# Advanced MMU Configuration Wizard
 # ============================================================
 
-# Helper: handle cancel/back
-# We simulate "Back" by returning a special code from steps.
-# Each step returns one of: next, back, cancel, review, edit
-# The controller interprets these.
-
-# Step 1: Motor count
-step_motor_count() {
-  local choice
-  choice=$(whiptail --title "FluxPath – MMU Config (1/6)" \
-    --radiolist "Number of drive motors:" 15 60 3 \
-    "2" "Two-slot MMU" $([ "$W_MOTOR_COUNT" = "2" ] && echo ON || echo OFF) \
-    "3" "Three-slot MMU" $([ "$W_MOTOR_COUNT" = "3" ] && echo ON || echo OFF) \
-    "4" "Four-slot MMU (default)" $([ "$W_MOTOR_COUNT" = "4" ] && echo ON || echo OFF) \
-    3>&1 1>&2 2>&3)
-
-  local status=$?
-  if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
-  fi
-
-  W_MOTOR_COUNT="$choice"
-  echo "next"
-}
-
-# Step 2: Motor pins
-step_motor_pins() {
-  local new_motor_pins=()
-  local i
-  for ((i=1; i<=W_MOTOR_COUNT; i++)); do
-    local default_val=""
-    if [ ${#W_MOTOR_PINS[@]} -ge $i ]; then
-      default_val="${W_MOTOR_PINS[$((i-1))]}"
-    fi
-    local mp
-    mp=$(whiptail --title "FluxPath – MMU Config (2/6)" \
-      --inputbox "Motor $i pin (MCU pin name):" 10 60 "$default_val" \
-      3>&1 1>&2 2>&3)
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    new_motor_pins+=("$mp")
-  done
-  W_MOTOR_PINS=("${new_motor_pins[@]}")
-  echo "next"
-}
-
-# Step 3: Sensor pins
-step_sensor_pins() {
-  local new_sensor_pins=()
-  local i
-  for ((i=1; i<=W_MOTOR_COUNT; i++)); do
-    local default_val=""
-    if [ ${#W_SENSOR_PINS[@]} -ge $i ]; then
-      default_val="${W_SENSOR_PINS[$((i-1))]}"
-    fi
-    local sp
-    sp=$(whiptail --title "FluxPath – MMU Config (3/6)" \
-      --inputbox "Sensor $i pin (MCU pin name):" 10 60 "$default_val" \
-      3>&1 1>&2 2>&3)
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    new_sensor_pins+=("$sp")
-  done
-  W_SENSOR_PINS=("${new_sensor_pins[@]}")
-  echo "next"
-}
-
-# Step 4: Cutter settings
-step_cutter() {
-  # Cutter present
-  local cutter_choice
-  if [ "$W_CUTTER_PRESENT" = "true" ]; then
-    whiptail --title "FluxPath – MMU Config (4/6)" --yesno "Is a cutter installed?" 10 60
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    cutter_choice="true"
-  else
-    whiptail --title "FluxPath – MMU Config (4/6)" --yesno "Is a cutter installed?" 10 60
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    cutter_choice="true"
-  fi
-
-  if [ $? -ne 0 ]; then
-    # If user chose "No" in yesno, status is 1
-    cutter_choice="false"
-  fi
-
-  W_CUTTER_PRESENT="$cutter_choice"
-
-  # Cutter pin if present
-  if [ "$W_CUTTER_PRESENT" = "true" ]; then
-    local cp
-    cp=$(whiptail --title "FluxPath – MMU Config (4/6)" \
-      --inputbox "Cutter pin (MCU pin name):" 10 60 "$W_CUTTER_PIN" \
-      3>&1 1>&2 2>&3)
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    W_CUTTER_PIN="$cp"
-  fi
-
-  echo "next"
-}
-
-# Step 5: Distances
-step_distances() {
-  local fd rd
-
-  fd=$(whiptail --title "FluxPath – MMU Config (5/6)" \
-    --inputbox "Feed distance (mm):" 10 60 "$W_FEED_DISTANCE" \
-    3>&1 1>&2 2>&3)
-  local status=$?
-  if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
-  fi
-
-  rd=$(whiptail --title "FluxPath – MMU Config (5/6)" \
-    --inputbox "Retract distance (mm):" 10 60 "$W_RETRACT_DISTANCE" \
-    3>&1 1>&2 2>&3)
-  status=$?
-  if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
-  fi
-
-  W_FEED_DISTANCE="$fd"
-  W_RETRACT_DISTANCE="$rd"
-  echo "next"
-}
-
-# Step 6: Colors
-step_colors() {
-  local colors
-  colors=$(whiptail --title "FluxPath – MMU Config (6/6)" \
-    --inputbox "Comma-separated color names (for slots):" 10 70 "$W_COLORS" \
-    3>&1 1>&2 2>&3)
-  local status=$?
-  if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
-  fi
-  W_COLORS="$colors"
-  echo "next"
-}
-
-# Build JSON arrays from arrays
 build_json_array() {
   local -n arr_ref=$1
   local out="["
@@ -421,12 +298,127 @@ build_json_array() {
   echo "$out"
 }
 
-# Step 7: Review
-step_review() {
-  local motor_pins_json sensor_pins_json
-  motor_pins_json=$(build_json_array W_MOTOR_PINS)
-  sensor_pins_json=$(build_json_array W_SENSOR_PINS)
+step_motor_count() {
+  local choice
+  choice=$(whiptail --title "FluxPath – MMU Config (1/6)" \
+    --radiolist "Number of drive motors:" 15 60 3 \
+    "2" "Two-slot MMU" $([ "$W_MOTOR_COUNT" = "2" ] && echo ON || echo OFF) \
+    "3" "Three-slot MMU" $([ "$W_MOTOR_COUNT" = "3" ] && echo ON || echo OFF) \
+    "4" "Four-slot MMU (default)" $([ "$W_MOTOR_COUNT" = "4" ] && echo ON || echo OFF) \
+    3>&1 1>&2 2>&3)
+  local status=$?
+  if [ $status -ne 0 ]; then
+    echo "cancel"; return
+  fi
+  W_MOTOR_COUNT="$choice"
+  echo "next"
+}
 
+step_motor_pins() {
+  local new_motor_pins=()
+  local i
+  for ((i=1; i<=W_MOTOR_COUNT; i++)); do
+    local default_val=""
+    if [ ${#W_MOTOR_PINS[@]} -ge $i ]; then
+      default_val="${W_MOTOR_PINS[$((i-1))]}"
+    fi
+    local mp
+    mp=$(whiptail --title "FluxPath – MMU Config (2/6)" \
+      --inputbox "Motor $i pin (MCU pin name):" 10 60 "$default_val" \
+      3>&1 1>&2 2>&3)
+    local status=$?
+    if [ $status -ne 0 ]; then
+      echo "cancel"; return
+    fi
+    new_motor_pins+=("$mp")
+  done
+  W_MOTOR_PINS=("${new_motor_pins[@]}")
+  echo "next"
+}
+
+step_sensor_pins() {
+  local new_sensor_pins=()
+  local i
+  for ((i=1; i<=W_MOTOR_COUNT; i++)); do
+    local default_val=""
+    if [ ${#W_SENSOR_PINS[@]} -ge $i ]; then
+      default_val="${W_SENSOR_PINS[$((i-1))]}"
+    fi
+    local sp
+    sp=$(whiptail --title "FluxPath – MMU Config (3/6)" \
+      --inputbox "Sensor $i pin (MCU pin name):" 10 60 "$default_val" \
+      3>&1 1>&2 2>&3)
+    local status=$?
+    if [ $status -ne 0 ]; then
+      echo "cancel"; return
+    fi
+    new_sensor_pins+=("$sp")
+  done
+  W_SENSOR_PINS=("${new_sensor_pins[@]}")
+  echo "next"
+}
+
+step_cutter() {
+  local cutter_choice
+  whiptail --title "FluxPath – MMU Config (4/6)" --yesno "Is a cutter installed?" 10 60
+  local status=$?
+  if [ $status -eq 0 ]; then
+    cutter_choice="true"
+  else
+    cutter_choice="false"
+  fi
+  W_CUTTER_PRESENT="$cutter_choice"
+
+  if [ "$W_CUTTER_PRESENT" = "true" ]; then
+    local cp
+    cp=$(whiptail --title "FluxPath – MMU Config (4/6)" \
+      --inputbox "Cutter pin (MCU pin name):" 10 60 "$W_CUTTER_PIN" \
+      3>&1 1>&2 2>&3)
+    status=$?
+    if [ $status -ne 0 ]; then
+      echo "cancel"; return
+    fi
+    W_CUTTER_PIN="$cp"
+  fi
+
+  echo "next"
+}
+
+step_distances() {
+  local fd rd
+  fd=$(whiptail --title "FluxPath – MMU Config (5/6)" \
+    --inputbox "Feed distance (mm):" 10 60 "$W_FEED_DISTANCE" \
+    3>&1 1>&2 2>&3)
+  local status=$?
+  if [ $status -ne 0 ]; then
+    echo "cancel"; return
+  fi
+  rd=$(whiptail --title "FluxPath – MMU Config (5/6)" \
+    --inputbox "Retract distance (mm):" 10 60 "$W_RETRACT_DISTANCE" \
+    3>&1 1>&2 2>&3)
+  status=$?
+  if [ $status -ne 0 ]; then
+    echo "cancel"; return
+  fi
+  W_FEED_DISTANCE="$fd"
+  W_RETRACT_DISTANCE="$rd"
+  echo "next"
+}
+
+step_colors() {
+  local colors
+  colors=$(whiptail --title "FluxPath – MMU Config (6/6)" \
+    --inputbox "Comma-separated color names (for slots):" 10 70 "$W_COLORS" \
+    3>&1 1>&2 2>&3)
+  local status=$?
+  if [ $status -ne 0 ]; then
+    echo "cancel"; return
+  fi
+  W_COLORS="$colors"
+  echo "next"
+}
+
+step_review() {
   local cutter_text="No"
   [ "$W_CUTTER_PRESENT" = "true" ] && cutter_text="Yes"
 
@@ -438,7 +430,6 @@ Drive motors: $W_MOTOR_COUNT
 
 Motor pins:
 "
-
   local i
   for ((i=0; i<${#W_MOTOR_PINS[@]}; i++)); do
     review+="  $((i+1)): ${W_MOTOR_PINS[$i]}
@@ -473,19 +464,16 @@ What would you like to do?" 25 80 4 \
     "restart" "Start wizard over" \
     "cancel"  "Cancel without saving" \
     3>&1 1>&2 2>&3)
-
   local status=$?
   if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
+    echo "cancel"; return
   fi
 
   case "$choice" in
     confirm)
-      # Write config file
+      local motor_pins_json sensor_pins_json
       motor_pins_json=$(build_json_array W_MOTOR_PINS)
       sensor_pins_json=$(build_json_array W_SENSOR_PINS)
-
       mkdir -p "$CONFIG_DIR"
       cat <<CFG > "$CONFIG_FILE"
 {
@@ -505,19 +493,12 @@ CFG
 $CONFIG_FILE" 12 70
       echo "done"
       ;;
-    edit)
-      echo "edit"
-      ;;
-    restart)
-      echo "restart"
-      ;;
-    cancel)
-      echo "cancel"
-      ;;
+    edit)    echo "edit" ;;
+    restart) echo "restart" ;;
+    cancel)  echo "cancel" ;;
   esac
 }
 
-# Step 8: Advanced edit menu
 step_edit_menu() {
   local choice
   choice=$(whiptail --title "FluxPath – Edit Configuration" --menu "Select section to edit:" 20 70 8 \
@@ -530,13 +511,10 @@ step_edit_menu() {
     "restart"  "Restart entire wizard" \
     "cancel"   "Cancel editing and return to review" \
     3>&1 1>&2 2>&3)
-
   local status=$?
   if [ $status -ne 0 ]; then
-    echo "review"
-    return
+    echo "review"; return
   fi
-
   case "$choice" in
     motors)  echo "motors" ;;
     mpins)   echo "mpins" ;;
@@ -552,7 +530,9 @@ step_edit_menu() {
 mmu_config_wizard() {
   mkdir -p "$CONFIG_DIR"
 
-  # Initialize with defaults if empty
+  # Load defaults from Klipper MMU config if present
+  load_defaults_from_klipper
+
   W_MOTOR_COUNT=${W_MOTOR_COUNT:-$DEFAULT_MOTORS}
   W_COLORS=${W_COLORS:-$DEFAULT_COLORS}
   W_FEED_DISTANCE=${W_FEED_DISTANCE:-$DEFAULT_FEED_DISTANCE}
@@ -561,7 +541,6 @@ mmu_config_wizard() {
   W_CUTTER_PIN=${W_CUTTER_PIN:-$DEFAULT_CUTTER_PIN}
 
   local step="motors"
-
   while true; do
     case "$step" in
       motors)
@@ -575,7 +554,7 @@ mmu_config_wizard() {
         res=$(step_motor_pins)
         case "$res" in
           next) step="spins" ;;
-          cancel) step="motors" ;; # treat cancel here as back to motors
+          cancel) step="motors" ;;
         esac
         ;;
       spins)
@@ -632,15 +611,13 @@ mmu_config_wizard() {
   done
 }
 
-# ------------------------ UI Integration ------------------------
+# ---------- UI Integration ----------
 ui_integration_menu() {
   ensure_ui_panels
-
   choice=$(whiptail --title "FluxPath – UI Integration" --radiolist "Choose UI integration:" 20 70 3 \
     "mainsail" "Install Mainsail panel" ON \
     "fluidd"   "Install Fluidd panel"   OFF \
     "both"     "Install both panels"    OFF 3>&1 1>&2 2>&3) || return
-
   case "$choice" in
     mainsail)
       cp "$UI_DIR/mainsail_mmu_panel.json" "$MAINSAIL_PANELS/"
@@ -658,13 +635,12 @@ ui_integration_menu() {
   esac
 }
 
-# ------------------------ Backend Controls ------------------------
+# ---------- Backend Controls ----------
 backend_controls_menu() {
   if ! command -v systemctl >/dev/null 2>&1; then
     whiptail --title "Backend Controls" --msgbox "systemctl not available on this system." 10 60
     return
   fi
-
   while true; do
     state=$(backend_service_state)
     choice=$(whiptail --title "FluxPath – Backend Controls" --menu "fluxpath.service is currently: $state" 20 70 6 \
@@ -673,33 +649,23 @@ backend_controls_menu() {
       "restart" "Restart backend service" \
       "status"  "Show systemctl status" \
       "back"    "Return to main menu" 3>&1 1>&2 2>&3) || break
-
     case "$choice" in
-      start)
-        sudo systemctl start fluxpath.service || true
-        ;;
-      stop)
-        sudo systemctl stop fluxpath.service || true
-        ;;
-      restart)
-        sudo systemctl restart fluxpath.service || true
-        ;;
+      start)   sudo systemctl start fluxpath.service || true ;;
+      stop)    sudo systemctl stop fluxpath.service || true ;;
+      restart) sudo systemctl restart fluxpath.service || true ;;
       status)
         status_out=$(systemctl status fluxpath.service 2>&1 | sed 's/\\/\\\\/g')
         whiptail --title "fluxpath.service status" --msgbox "$status_out" 25 100
         ;;
-      back)
-        break
-        ;;
+      back) break ;;
     esac
   done
 }
 
-# ------------------------ Main Menu ------------------------
+# ---------- Main Menu ----------
 main_menu() {
   show_banner
   check_environment
-
   while true; do
     choice=$(whiptail --title "FluxPath Installer" --menu "Choose an action:" 20 80 9 \
       "1" "Live System Status Dashboard" \
@@ -710,7 +676,6 @@ main_menu() {
       "6" "One-shot System Status Snapshot" \
       "7" "About FluxPath" \
       "0" "Exit Installer" 3>&1 1>&2 2>&3) || exit 0
-
     case "$choice" in
       1) show_system_status_live ;;
       2) show_config_summary ;;

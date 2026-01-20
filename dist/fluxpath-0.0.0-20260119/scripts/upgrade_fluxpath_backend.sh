@@ -1,3 +1,21 @@
+#!/bin/bash
+
+echo "=== Upgrading FluxPath backend with health, printer API, WS, and dashboard ==="
+
+BASE_DIR="/home/syko/FluxPath"
+VENV_DIR="$BASE_DIR/venv"
+SERVER_FILE="$BASE_DIR/server.py"
+
+echo "Ensuring FastAPI + Uvicorn are installed..."
+# Only source if it exists
+if [ -f "$VENV_DIR/bin/activate" ]; then
+    source "$VENV_DIR/bin/activate"
+fi
+"$VENV_DIR/bin/pip" install fastapi uvicorn
+
+echo "Writing enhanced FastAPI backend to $SERVER_FILE..."
+
+cat > "$SERVER_FILE" << 'EOF'
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, HTMLResponse
 import uvicorn
@@ -6,12 +24,9 @@ from typing import List
 
 app = FastAPI(title="FluxPath Backend")
 
-from backend.mmu import routes as mmu_routes
-app.include_router(mmu_routes.router)
-
-# ---------------------------------------------------------
-# Virtual printer + MMU state (replace with real MMU later)
-# ---------------------------------------------------------
+# -----------------------------
+# In-memory printer state
+# -----------------------------
 printer_state = {
     "name": "FluxPath Virtual Printer",
     "model": "FluxPath-MMU",
@@ -31,9 +46,9 @@ printer_state = {
     },
 }
 
-# ---------------------------------------------------------
-# WebSocket connection manager
-# ---------------------------------------------------------
+# -----------------------------
+# Connected WebSocket clients
+# -----------------------------
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -47,17 +62,20 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
-        for connection in list(self.active_connections):
+        to_remove = []
+        for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except:
-                self.disconnect(connection)
+            except Exception:
+                to_remove.append(connection)
+        for conn in to_remove:
+            self.disconnect(conn)
 
 manager = ConnectionManager()
 
-# ---------------------------------------------------------
-# Dashboard HTML
-# ---------------------------------------------------------
+# -----------------------------
+# Simple dashboard UI
+# -----------------------------
 DASHBOARD_HTML = """
 <!DOCTYPE html>
 <html>
@@ -69,27 +87,23 @@ DASHBOARD_HTML = """
         .card { background: #1a202c; padding: 16px; border-radius: 8px; margin-bottom: 16px; }
         .label { color: #a0aec0; font-size: 0.9em; }
         .value { font-size: 1.1em; }
-        pre { background: #2d3748; padding: 12px; border-radius: 6px; }
+        code { background: #2d3748; padding: 2px 4px; border-radius: 4px; }
     </style>
 </head>
 <body>
     <h1>FluxPath Backend</h1>
-
     <div class="card">
         <div class="label">Health</div>
         <div class="value" id="health">Loading...</div>
     </div>
-
     <div class="card">
         <div class="label">Printer Status</div>
         <pre id="printer-status">{}</pre>
     </div>
-
     <div class="card">
         <div class="label">WebSocket</div>
         <div class="value" id="ws-status">Connecting...</div>
     </div>
-
     <script>
         async function fetchHealth() {
             try {
@@ -120,7 +134,9 @@ DASHBOARD_HTML = """
                 document.getElementById('ws-status').innerText = 'disconnected (retrying...)';
                 setTimeout(connectWS, 2000);
             };
-            ws.onmessage = (event) => {};
+            ws.onmessage = (event) => {
+                // Optionally handle messages
+            };
         }
 
         fetchHealth();
@@ -137,13 +153,16 @@ DASHBOARD_HTML = """
 async def dashboard():
     return HTMLResponse(DASHBOARD_HTML)
 
-# ---------------------------------------------------------
-# Health + Printer API
-# ---------------------------------------------------------
+# -----------------------------
+# Health check
+# -----------------------------
 @app.get("/health")
 async def health():
     return JSONResponse({"status": "ok"})
 
+# -----------------------------
+# Printer API
+# -----------------------------
 @app.get("/printer/info")
 async def printer_info():
     return JSONResponse({
@@ -161,9 +180,9 @@ async def printer_status():
         "mmu": printer_state["mmu"],
     })
 
-# ---------------------------------------------------------
-# Capabilities endpoint (OrcaSlicer)
-# ---------------------------------------------------------
+# -----------------------------
+# FluxPath capabilities
+# -----------------------------
 @app.get("/fluxpath/capabilities")
 async def capabilities():
     return JSONResponse({
@@ -173,9 +192,9 @@ async def capabilities():
         "ws": "/fluxpath/ws"
     })
 
-# ---------------------------------------------------------
-# WebSocket endpoint
-# ---------------------------------------------------------
+# -----------------------------
+# WebSocket status broadcaster
+# -----------------------------
 @app.websocket("/fluxpath/ws")
 async def fluxpath_ws(websocket: WebSocket):
     await manager.connect(websocket)
@@ -191,8 +210,44 @@ async def fluxpath_ws(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# ---------------------------------------------------------
-# Uvicorn startup (THIS is what opens port 9876)
-# ---------------------------------------------------------
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=9876)
+EOF
+
+echo "Fixing systemd service to use correct paths..."
+SERVICE_FILE="/etc/systemd/system/fluxpath.service"
+
+sudo bash -c "cat > $SERVICE_FILE" << EOF
+[Unit]
+Description=FluxPath LAN Device Backend
+After=network.target
+
+[Service]
+Type=simple
+User=syko
+WorkingDirectory=$BASE_DIR
+ExecStart=$VENV_DIR/bin/python $SERVER_FILE
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "Reloading systemd..."
+sudo systemctl daemon-reload
+
+echo "Restarting fluxpath systemd service..."
+sudo systemctl restart fluxpath.service
+
+echo "Checking service status..."
+sudo systemctl status fluxpath.service --no-pager
+
+echo "Verifying port 9876..."
+sudo ss -tulpn | grep 9876 || echo "Port 9876 is free (unexpected)."
+
+echo "Try opening:  http://<this-machine-ip>:9876/"
+echo "And OrcaSlicer should still use: http://<this-machine-ip>:9876/fluxpath/capabilities"
+
+echo "=== Upgrade complete ==="

@@ -1,0 +1,15 @@
+[Unit]
+Description=FluxPath LAN Device Backend
+After=network.target
+
+[Service]
+Type=simple
+User=syko
+WorkingDirectory=/home/syko/FluxPath
+ExecStart=/home/syko/FluxPath/venv/bin/python /home/syko/FluxPath/server.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

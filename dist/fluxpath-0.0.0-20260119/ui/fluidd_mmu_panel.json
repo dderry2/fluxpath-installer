@@ -1,0 +1,13 @@
+{
+  "name": "FluxPath MMU",
+  "type": "custom",
+  "content": {
+    "title": "FluxPath MMU Status",
+    "widgets": [
+      { "type": "webcam", "source": "/webcam/stream" },
+      { "type": "status", "source": "/mmu/status" },
+      { "type": "colors", "source": "/mmu/colors" },
+      { "type": "sensors", "source": "/mmu/sensors" }
+    ]
+  }
+}

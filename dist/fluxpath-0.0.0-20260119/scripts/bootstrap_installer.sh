@@ -1,34 +1,25 @@
 #!/bin/bash
 set -e
 
-# ============================================================
-# FluxPath Bootstrap Script
-# Creates full FluxPath suite + advanced installer wizard
-# ============================================================
-
 BASE_DIR="$HOME/FluxPath"
 CONFIG_DIR="$BASE_DIR/config"
 UI_DIR="$BASE_DIR/ui"
 SCRIPTS_DIR="$BASE_DIR/scripts"
 MAINSAIL_PANELS="$HOME/.local/share/mainsail/panels"
 FLUIDD_PANELS="$HOME/.local/share/fluidd/panels"
-CONFIG_FILE="$CONFIG_DIR/fluxpath_config.json"
 
-mkdir -p "$BASE_DIR" "$CONFIG_DIR" "$UI_DIR" "$SCRIPTS_DIR" "$MAINSAIL_PANELS" "$FLUIDD_PANELS"
+mkdir -p "$CONFIG_DIR" "$UI_DIR" "$SCRIPTS_DIR" "$MAINSAIL_PANELS" "$FLUIDD_PANELS"
 
 BANNER='  __ _  _  ___   _____  __ _____ _  _  
 | __| || || \ \_/ / _,\/  \_   _| || | 
 | _|| || \/ |> , <| v_/ /\ || | | >< | 
 |_| |___\__//_/ \_\_| |_||_||_| |_||_| '
 
-# ============================================================
-# install.sh with advanced MMU configuration wizard
-# ============================================================
+# ------------------------ install.sh ------------------------
 cat << 'EOF' > "$BASE_DIR/install.sh"
 #!/bin/bash
 set -e
 
-# ------------------------ FluxPath Banner ------------------------
 LOGO=$(cat << 'BEOF'
   __ _  _  ___   _____  __ _____ _  _  
 | __| || || \ \_/ / _,\/  \_   _| || | 
@@ -37,35 +28,14 @@ LOGO=$(cat << 'BEOF'
 BEOF
 )
 
-# ------------------------ Paths ------------------------
 BASE_DIR="$HOME/FluxPath"
 CONFIG_DIR="$BASE_DIR/config"
 UI_DIR="$BASE_DIR/ui"
 MAINSAIL_PANELS="$HOME/.local/share/mainsail/panels"
 FLUIDD_PANELS="$HOME/.local/share/fluidd/panels"
-CONFIG_FILE="$CONFIG_DIR/fluxpath_config.json"
 
 mkdir -p "$CONFIG_DIR" "$UI_DIR" "$MAINSAIL_PANELS" "$FLUIDD_PANELS"
 
-# ------------------------ Defaults ------------------------
-DEFAULT_MOTORS=4
-DEFAULT_COLORS="Red,Green,Blue,Yellow"
-DEFAULT_FEED_DISTANCE="120.0"
-DEFAULT_RETRACT_DISTANCE="80.0"
-DEFAULT_CUTTER_PRESENT="true"
-DEFAULT_CUTTER_PIN="PA0"
-
-# These variables will be filled by the wizard
-W_MOTOR_COUNT="$DEFAULT_MOTORS"
-W_MOTOR_PINS=()
-W_SENSOR_PINS=()
-W_COLORS="$DEFAULT_COLORS"
-W_CUTTER_PRESENT="$DEFAULT_CUTTER_PRESENT"
-W_CUTTER_PIN="$DEFAULT_CUTTER_PIN"
-W_FEED_DISTANCE="$DEFAULT_FEED_DISTANCE"
-W_RETRACT_DISTANCE="$DEFAULT_RETRACT_DISTANCE"
-
-# ------------------------ Dependency checks ------------------------
 need_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "missing"
@@ -90,7 +60,6 @@ Fluidd:    $FLUIDD_PANELS
   whiptail --title "FluxPath – Environment Check" --msgbox "$msg" 20 80
 }
 
-# ------------------------ Backend / API helpers ------------------------
 get_backend_health_raw() { curl -s http://localhost:9876/health 2>/dev/null || echo "unreachable"; }
 get_printer_info_raw()  { curl -s http://localhost:7125/printer/info 2>/dev/null || echo "unreachable"; }
 get_mmu_status_raw()    { curl -s http://localhost:9876/mmu/status 2>/dev/null || echo "unreachable"; }
@@ -106,7 +75,6 @@ backend_service_state() {
   fi
 }
 
-# ------------------------ Friendly wrappers ------------------------
 fmt_status() {
   local label="$1"
   local raw="$2"
@@ -130,7 +98,6 @@ fmt_webcam() {
   fi
 }
 
-# ------------------------ UI panels ------------------------
 ensure_ui_panels() {
   cat <<PEOF > "$UI_DIR/mainsail_mmu_panel.json"
 {
@@ -159,7 +126,6 @@ ui_panels_status() {
 $f"
 }
 
-# ------------------------ Banner & About ------------------------
 show_banner() {
   whiptail --title "FluxPath Installer" --msgbox "$LOGO" 15 70
 }
@@ -189,7 +155,6 @@ Backend:
   whiptail --title "About FluxPath" --msgbox "$msg" 25 90
 }
 
-# ------------------------ Status Screens ------------------------
 show_system_status_once() {
   local backend_state backend_health printer mmu_status mmu_sensors mmu_motors webcam panels
 
@@ -259,407 +224,15 @@ Press <Yes> to refresh, <No> to return.
 }
 
 show_config_summary() {
-  if [ -f "$CONFIG_FILE" ]; then
-    summary=$(cat "$CONFIG_FILE")
+  if [ -f "$CONFIG_DIR/fluxpath_config.json" ]; then
+    summary=$(cat "$CONFIG_DIR/fluxpath_config.json")
   else
     summary="No config found at:
-$CONFIG_FILE"
+$CONFIG_DIR/fluxpath_config.json"
   fi
   whiptail --title "FluxPath – MMU Config Summary" --msgbox "$summary" 25 100
 }
 
-# ============================================================
-# Advanced MMU Configuration Wizard (modular steps)
-# ============================================================
-
-# Helper: handle cancel/back
-# We simulate "Back" by returning a special code from steps.
-# Each step returns one of: next, back, cancel, review, edit
-# The controller interprets these.
-
-# Step 1: Motor count
-step_motor_count() {
-  local choice
-  choice=$(whiptail --title "FluxPath – MMU Config (1/6)" \
-    --radiolist "Number of drive motors:" 15 60 3 \
-    "2" "Two-slot MMU" $([ "$W_MOTOR_COUNT" = "2" ] && echo ON || echo OFF) \
-    "3" "Three-slot MMU" $([ "$W_MOTOR_COUNT" = "3" ] && echo ON || echo OFF) \
-    "4" "Four-slot MMU (default)" $([ "$W_MOTOR_COUNT" = "4" ] && echo ON || echo OFF) \
-    3>&1 1>&2 2>&3)
-
-  local status=$?
-  if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
-  fi
-
-  W_MOTOR_COUNT="$choice"
-  echo "next"
-}
-
-# Step 2: Motor pins
-step_motor_pins() {
-  local new_motor_pins=()
-  local i
-  for ((i=1; i<=W_MOTOR_COUNT; i++)); do
-    local default_val=""
-    if [ ${#W_MOTOR_PINS[@]} -ge $i ]; then
-      default_val="${W_MOTOR_PINS[$((i-1))]}"
-    fi
-    local mp
-    mp=$(whiptail --title "FluxPath – MMU Config (2/6)" \
-      --inputbox "Motor $i pin (MCU pin name):" 10 60 "$default_val" \
-      3>&1 1>&2 2>&3)
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    new_motor_pins+=("$mp")
-  done
-  W_MOTOR_PINS=("${new_motor_pins[@]}")
-  echo "next"
-}
-
-# Step 3: Sensor pins
-step_sensor_pins() {
-  local new_sensor_pins=()
-  local i
-  for ((i=1; i<=W_MOTOR_COUNT; i++)); do
-    local default_val=""
-    if [ ${#W_SENSOR_PINS[@]} -ge $i ]; then
-      default_val="${W_SENSOR_PINS[$((i-1))]}"
-    fi
-    local sp
-    sp=$(whiptail --title "FluxPath – MMU Config (3/6)" \
-      --inputbox "Sensor $i pin (MCU pin name):" 10 60 "$default_val" \
-      3>&1 1>&2 2>&3)
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    new_sensor_pins+=("$sp")
-  done
-  W_SENSOR_PINS=("${new_sensor_pins[@]}")
-  echo "next"
-}
-
-# Step 4: Cutter settings
-step_cutter() {
-  # Cutter present
-  local cutter_choice
-  if [ "$W_CUTTER_PRESENT" = "true" ]; then
-    whiptail --title "FluxPath – MMU Config (4/6)" --yesno "Is a cutter installed?" 10 60
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    cutter_choice="true"
-  else
-    whiptail --title "FluxPath – MMU Config (4/6)" --yesno "Is a cutter installed?" 10 60
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    cutter_choice="true"
-  fi
-
-  if [ $? -ne 0 ]; then
-    # If user chose "No" in yesno, status is 1
-    cutter_choice="false"
-  fi
-
-  W_CUTTER_PRESENT="$cutter_choice"
-
-  # Cutter pin if present
-  if [ "$W_CUTTER_PRESENT" = "true" ]; then
-    local cp
-    cp=$(whiptail --title "FluxPath – MMU Config (4/6)" \
-      --inputbox "Cutter pin (MCU pin name):" 10 60 "$W_CUTTER_PIN" \
-      3>&1 1>&2 2>&3)
-    local status=$?
-    if [ $status -ne 0 ]; then
-      echo "cancel"
-      return
-    fi
-    W_CUTTER_PIN="$cp"
-  fi
-
-  echo "next"
-}
-
-# Step 5: Distances
-step_distances() {
-  local fd rd
-
-  fd=$(whiptail --title "FluxPath – MMU Config (5/6)" \
-    --inputbox "Feed distance (mm):" 10 60 "$W_FEED_DISTANCE" \
-    3>&1 1>&2 2>&3)
-  local status=$?
-  if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
-  fi
-
-  rd=$(whiptail --title "FluxPath – MMU Config (5/6)" \
-    --inputbox "Retract distance (mm):" 10 60 "$W_RETRACT_DISTANCE" \
-    3>&1 1>&2 2>&3)
-  status=$?
-  if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
-  fi
-
-  W_FEED_DISTANCE="$fd"
-  W_RETRACT_DISTANCE="$rd"
-  echo "next"
-}
-
-# Step 6: Colors
-step_colors() {
-  local colors
-  colors=$(whiptail --title "FluxPath – MMU Config (6/6)" \
-    --inputbox "Comma-separated color names (for slots):" 10 70 "$W_COLORS" \
-    3>&1 1>&2 2>&3)
-  local status=$?
-  if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
-  fi
-  W_COLORS="$colors"
-  echo "next"
-}
-
-# Build JSON arrays from arrays
-build_json_array() {
-  local -n arr_ref=$1
-  local out="["
-  local i
-  for ((i=0; i<${#arr_ref[@]}; i++)); do
-    out+="\"${arr_ref[$i]}\""
-    if [ $i -lt $(( ${#arr_ref[@]} - 1 )) ]; then
-      out+=", "
-    fi
-  done
-  out+="]"
-  echo "$out"
-}
-
-# Step 7: Review
-step_review() {
-  local motor_pins_json sensor_pins_json
-  motor_pins_json=$(build_json_array W_MOTOR_PINS)
-  sensor_pins_json=$(build_json_array W_SENSOR_PINS)
-
-  local cutter_text="No"
-  [ "$W_CUTTER_PRESENT" = "true" ] && cutter_text="Yes"
-
-  local review="
-FluxPath Configuration Review
------------------------------
-
-Drive motors: $W_MOTOR_COUNT
-
-Motor pins:
-"
-
-  local i
-  for ((i=0; i<${#W_MOTOR_PINS[@]}; i++)); do
-    review+="  $((i+1)): ${W_MOTOR_PINS[$i]}
-"
-  done
-
-  review+="
-Sensor pins:
-"
-  for ((i=0; i<${#W_SENSOR_PINS[@]}; i++)); do
-    review+="  $((i+1)): ${W_SENSOR_PINS[$i]}
-"
-  done
-
-  review+="
-Cutter installed: $cutter_text
-Cutter pin: $W_CUTTER_PIN
-
-Feed distance:    $W_FEED_DISTANCE mm
-Retract distance: $W_RETRACT_DISTANCE mm
-
-Slot colors:
-  $W_COLORS
-"
-
-  local choice
-  choice=$(whiptail --title "FluxPath – Review Configuration" --menu "$review
-
-What would you like to do?" 25 80 4 \
-    "confirm" "Confirm and save configuration" \
-    "edit"    "Edit specific section" \
-    "restart" "Start wizard over" \
-    "cancel"  "Cancel without saving" \
-    3>&1 1>&2 2>&3)
-
-  local status=$?
-  if [ $status -ne 0 ]; then
-    echo "cancel"
-    return
-  fi
-
-  case "$choice" in
-    confirm)
-      # Write config file
-      motor_pins_json=$(build_json_array W_MOTOR_PINS)
-      sensor_pins_json=$(build_json_array W_SENSOR_PINS)
-
-      mkdir -p "$CONFIG_DIR"
-      cat <<CFG > "$CONFIG_FILE"
-{
-  "config_version": 1,
-  "drive_motors": $W_MOTOR_COUNT,
-  "motor_pins": $motor_pins_json,
-  "sensor_pins": $sensor_pins_json,
-  "colors": "$W_COLORS",
-  "cutter_present": $W_CUTTER_PRESENT,
-  "cutter_pin": "$W_CUTTER_PIN",
-  "feed_distance_mm": $W_FEED_DISTANCE,
-  "retract_distance_mm": $W_RETRACT_DISTANCE
-}
-CFG
-      whiptail --title "FluxPath – MMU Config" --msgbox "Configuration saved to:
-
-$CONFIG_FILE" 12 70
-      echo "done"
-      ;;
-    edit)
-      echo "edit"
-      ;;
-    restart)
-      echo "restart"
-      ;;
-    cancel)
-      echo "cancel"
-      ;;
-  esac
-}
-
-# Step 8: Advanced edit menu
-step_edit_menu() {
-  local choice
-  choice=$(whiptail --title "FluxPath – Edit Configuration" --menu "Select section to edit:" 20 70 8 \
-    "motors"   "Motor count" \
-    "mpins"    "Motor pins" \
-    "spins"    "Sensor pins" \
-    "cutter"   "Cutter settings" \
-    "dist"     "Distances" \
-    "colors"   "Colors" \
-    "restart"  "Restart entire wizard" \
-    "cancel"   "Cancel editing and return to review" \
-    3>&1 1>&2 2>&3)
-
-  local status=$?
-  if [ $status -ne 0 ]; then
-    echo "review"
-    return
-  fi
-
-  case "$choice" in
-    motors)  echo "motors" ;;
-    mpins)   echo "mpins" ;;
-    spins)   echo "spins" ;;
-    cutter)  echo "cutter" ;;
-    dist)    echo "dist" ;;
-    colors)  echo "colors" ;;
-    restart) echo "restart" ;;
-    cancel)  echo "review" ;;
-  esac
-}
-
-mmu_config_wizard() {
-  mkdir -p "$CONFIG_DIR"
-
-  # Initialize with defaults if empty
-  W_MOTOR_COUNT=${W_MOTOR_COUNT:-$DEFAULT_MOTORS}
-  W_COLORS=${W_COLORS:-$DEFAULT_COLORS}
-  W_FEED_DISTANCE=${W_FEED_DISTANCE:-$DEFAULT_FEED_DISTANCE}
-  W_RETRACT_DISTANCE=${W_RETRACT_DISTANCE:-$DEFAULT_RETRACT_DISTANCE}
-  W_CUTTER_PRESENT=${W_CUTTER_PRESENT:-$DEFAULT_CUTTER_PRESENT}
-  W_CUTTER_PIN=${W_CUTTER_PIN:-$DEFAULT_CUTTER_PIN}
-
-  local step="motors"
-
-  while true; do
-    case "$step" in
-      motors)
-        res=$(step_motor_count)
-        case "$res" in
-          next) step="mpins" ;;
-          cancel) return ;;
-        esac
-        ;;
-      mpins)
-        res=$(step_motor_pins)
-        case "$res" in
-          next) step="spins" ;;
-          cancel) step="motors" ;; # treat cancel here as back to motors
-        esac
-        ;;
-      spins)
-        res=$(step_sensor_pins)
-        case "$res" in
-          next) step="cutter" ;;
-          cancel) step="mpins" ;;
-        esac
-        ;;
-      cutter)
-        res=$(step_cutter)
-        case "$res" in
-          next) step="dist" ;;
-          cancel) step="spins" ;;
-        esac
-        ;;
-      dist)
-        res=$(step_distances)
-        case "$res" in
-          next) step="colors" ;;
-          cancel) step="cutter" ;;
-        esac
-        ;;
-      colors)
-        res=$(step_colors)
-        case "$res" in
-          next) step="review" ;;
-          cancel) step="dist" ;;
-        esac
-        ;;
-      review)
-        res=$(step_review)
-        case "$res" in
-          done) return ;;
-          edit) step="edit" ;;
-          restart) step="motors" ;;
-          cancel) return ;;
-        esac
-        ;;
-      edit)
-        res=$(step_edit_menu)
-        case "$res" in
-          motors) step="motors" ;;
-          mpins)  step="mpins" ;;
-          spins)  step="spins" ;;
-          cutter) step="cutter" ;;
-          dist)   step="dist" ;;
-          colors) step="colors" ;;
-          restart) step="motors" ;;
-          review) step="review" ;;
-        esac
-        ;;
-    esac
-  done
-}
-
-# ------------------------ UI Integration ------------------------
 ui_integration_menu() {
   ensure_ui_panels
 
@@ -685,7 +258,6 @@ ui_integration_menu() {
   esac
 }
 
-# ------------------------ Backend Controls ------------------------
 backend_controls_menu() {
   if ! command -v systemctl >/dev/null 2>&1; then
     whiptail --title "Backend Controls" --msgbox "systemctl not available on this system." 10 60
@@ -722,30 +294,27 @@ backend_controls_menu() {
   done
 }
 
-# ------------------------ Main Menu ------------------------
 main_menu() {
   show_banner
   check_environment
 
   while true; do
-    choice=$(whiptail --title "FluxPath Installer" --menu "Choose an action:" 20 80 9 \
+    choice=$(whiptail --title "FluxPath Installer" --menu "Choose an action:" 20 80 8 \
       "1" "Live System Status Dashboard" \
       "2" "MMU Config Summary" \
-      "3" "MMU Configuration Wizard" \
-      "4" "UI Integration Manager (Mainsail/Fluidd)" \
-      "5" "Backend Service Tools" \
-      "6" "One-shot System Status Snapshot" \
-      "7" "About FluxPath" \
+      "3" "UI Integration Manager (Mainsail/Fluidd)" \
+      "4" "Backend Service Tools" \
+      "5" "One-shot System Status Snapshot" \
+      "6" "About FluxPath" \
       "0" "Exit Installer" 3>&1 1>&2 2>&3) || exit 0
 
     case "$choice" in
       1) show_system_status_live ;;
       2) show_config_summary ;;
-      3) mmu_config_wizard ;;
-      4) ui_integration_menu ;;
-      5) backend_controls_menu ;;
-      6) show_system_status_once ;;
-      7) show_about ;;
+      3) ui_integration_menu ;;
+      4) backend_controls_menu ;;
+      5) show_system_status_once ;;
+      6) show_about ;;
       0) exit 0 ;;
     esac
   done
@@ -754,9 +323,7 @@ main_menu() {
 main_menu
 EOF
 
-# ============================================================
-# config_editor.sh
-# ============================================================
+# ------------------------ config_editor.sh ------------------------
 cat << 'EOF' > "$SCRIPTS_DIR/config_editor.sh"
 #!/bin/bash
 set -e
@@ -779,6 +346,23 @@ show_banner() {
   whiptail --title "FluxPath Config Editor" --msgbox "$LOGO" 15 70
 }
 
+edit_config() {
+  local drives colors note
+  drives=$(whiptail --inputbox "Number of drive motors:" 10 60 "4" 3>&1 1>&2 2>&3) || return
+  colors=$(whiptail --inputbox "Comma-separated color names (for slots):" 10 60 "Red,Green,Blue,Yellow" 3>&1 1>&2 2>&3) || return
+  note=$(whiptail --inputbox "Optional description / notes:" 10 60 "" 3>&1 1>&2 2>&3) || note=""
+
+  cat <<CFG > "$CONFIG_FILE"
+{
+  "drive_motors": $drives,
+  "colors": "$colors",
+  "notes": "$note"
+}
+CFG
+
+  whiptail --title "Config Editor" --msgbox "Config saved to: $CONFIG_FILE" 10 60
+}
+
 view_config() {
   if [ -f "$CONFIG_FILE" ]; then
     content=$(cat "$CONFIG_FILE")
@@ -794,10 +378,12 @@ main_menu() {
   while true; do
     choice=$(whiptail --title "FluxPath Config Editor" --menu "Choose an action:" 20 70 5 \
       "1" "View current config" \
+      "2" "Edit/create config" \
       "0" "Exit" 3>&1 1>&2 2>&3) || exit 0
 
     case "$choice" in
       1) view_config ;;
+      2) edit_config ;;
       0) exit 0 ;;
     esac
   done
@@ -806,9 +392,7 @@ main_menu() {
 main_menu
 EOF
 
-# ============================================================
-# status_monitor.sh
-# ============================================================
+# ------------------------ status_monitor.sh ------------------------
 cat << 'EOF' > "$SCRIPTS_DIR/status_monitor.sh"
 #!/bin/bash
 set -e
@@ -893,9 +477,7 @@ show_status_loop() {
 show_status_loop
 EOF
 
-# ============================================================
-# hardware_test.sh (placeholder)
-# ============================================================
+# ------------------------ hardware_test.sh (placeholder) ------------------------
 cat << 'EOF' > "$SCRIPTS_DIR/hardware_test.sh"
 #!/bin/bash
 set -e
@@ -921,9 +503,7 @@ This script is reserved for:
 For now, all behavior is read-only and defined in other tools." 20 80
 EOF
 
-# ============================================================
-# printer_tools.sh (placeholder)
-# ============================================================
+# ------------------------ printer_tools.sh (future placeholder) ------------------------
 cat << 'EOF' > "$SCRIPTS_DIR/printer_tools.sh"
 #!/bin/bash
 set -e

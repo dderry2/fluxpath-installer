@@ -1,0 +1,4 @@
+FluxPath Release: 0.0.0-20260119
+Build Date: Mon 19 Jan 19:09:40 EST 2026
+Git Branch: main
+Git Commit: 719aaffb52b1deb253377b3fb8e26dbe004135b7
